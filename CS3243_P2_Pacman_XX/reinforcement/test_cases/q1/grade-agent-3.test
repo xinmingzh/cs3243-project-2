@@ -1,0 +1,6 @@
+class: "EvalAgentTest"
+
+# 100 test games after 1000 training games
+pacmanParams: "-p PacmanQAgent -x 1000 -n 1100 -l smallGrid -q -f --fixRandomSeed"
+
+winsThresholds: "50"
