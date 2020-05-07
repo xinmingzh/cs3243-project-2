@@ -2,6 +2,8 @@
 
 ## Sudoku Puzzle Solver
 
-Basic implementation of sudoku puzzle solver is completed using bactracking search with forward checking and ac3 algo to improve efficiency. Current implementation is still slower than the benchmark, although not super significant.
+Basic implementation of sudoku puzzle solver is completed using bactracking search with forward checking and ac3 algo to improve efficiency.
 
-More work needs to be done to make the solver more efficient.
+An extra constraint is checked for in forward checking. The constraint states that in any group of cells, if a value is unique in all the cells' domains, the cell containing the value must be of that value. If that cell also contains other values, other values can be removed from the domain.
+
+Meets benchmark set in the assignment.
