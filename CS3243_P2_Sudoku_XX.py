@@ -24,6 +24,7 @@ class Sudoku(object):
         self.do_MRV = True
         self.do_LCV = True
         self.do_AC3 = True
+        self.do_constraint1 = True
 
 
     def solve(self):
@@ -155,7 +156,7 @@ class Sudoku(object):
         # forward checks for domain reductions
         if flag:
             # perform ac3 algo
-            count = 20    # limits the number of iterations of ac3 checks to reduce time spent
+            count = 23    # limits the number of iterations of ac3 checks to reduce time spent
         
             queue = [(xk, pos) for xk in self.neighbours[pos]]
             while count and queue:
@@ -173,6 +174,54 @@ class Sudoku(object):
                     if val in self.domains[neighbour]:
                         self.domains[neighbour].remove(val)
                         self.pruned[pos].append((neighbour, val))
+        
+        if self.do_constraint1:
+            revised = False
+            visited = set()
+            for p, v in self.pruned[pos]:
+                if v in visited:
+                    continue
+                if self.puzzle[pos[0]][pos[1]] == v:
+                    continue
+                visited.add(v)
+
+                count = 0
+                selected = None
+                for p1 in self.rows[pos[0]]:
+                    if p1 != pos and v in self.domains[p1]:
+                        if len(self.domains[p1]) == 1:
+                            break
+                        count += 1
+                        if count == 1:
+                            selected = p1
+                if count == 1:
+                    for v1 in self.domains[selected]:
+                        if v1 != v:
+                            self.domains[selected].remove(v1)
+                            if pos:
+                                self.pruned[pos].append((selected, v1))
+                            revised = True
+                
+                count = 0
+                for p1 in self.cols[pos[1]]:
+                    if p1 != pos and v in self.domains[p1]:
+                        if len(self.domains[p1]) == 1:
+                            count = 0
+                            break
+                        count += 1
+
+                        if count == 1:
+                            selected = p1
+                if count == 1:
+                    for v1 in self.domains[selected]:
+                        if v1 != v:
+                            self.domains[selected].remove(v1)
+                            if pos:
+                                self.pruned[pos].append((selected, v1))
+                            revised = True
+            if revised:
+                return self.forward_check(puzzle, pos, val, flag)
+
         return True
 
 
@@ -186,21 +235,6 @@ class Sudoku(object):
             self.pruned[pos] = []
 
             puzzle[pos[0]][pos[1]] = 0
-
-    def get_row(self, val):
-        return [(val, x) for x in range(9)]
-
-    def get_col(self, val):
-        return [(x, val) for x in range(9)]
-
-    def get_peers(self, pos):
-        # helper function
-        # get a list of peers (neighbours in the same 3*3 square)
-        result = []
-        for i in range(pos[0] - pos[0]%3, pos[0] - pos[0]%3 + 3):
-            for j in range(pos[1] - pos[1]%3, pos[1] - pos[1]%3 + 3):
-                result += [(i, j),]
-        return result
 
 
     def ac3(self, puzzle):
@@ -221,7 +255,7 @@ class Sudoku(object):
         # revise the pair of cells xi and xj
         # for value in domain of xi, if value not consistent with domain of xj, remove value
         revised = False
-
+        
         d = self.domains[xj]
         if len(d) == 1:
             if d[0] in self.domains[xi]:
@@ -229,21 +263,6 @@ class Sudoku(object):
                 if pos:
                     self.pruned[pos].append((xi, d[0]))
                 revised = True
-
-        # for x in self.domains[xi]:
-        #     if puzzle[xj[0]][xj[1]] == 0:
-        #         if not any([self.satisfy_binary_constraint(x, y) for y in self.domains[xj]]):
-        #             self.domains[xi].remove(x)
-        #             if pos:
-        #                 self.pruned[pos].append((xi, x))
-        #             if not revised:
-        #                 revised = True
-        #     elif x == puzzle[xj[0]][xj[1]]:
-        #         self.domains[xi].remove(x)
-        #         if pos:
-        #             self.pruned[pos].append((xi, x))
-        #         if not revised:
-        #             revised = True
         return revised
 
 
@@ -287,18 +306,15 @@ class Sudoku(object):
         # Set up rows dict, cols dict i -> [pos] and peers dict (i, j) -> [pos]
         # Set up empty pruned list
         for i in range(9):
-            self.rows[i] = self.get_row(i)
-            self.cols[i] = self.get_col(i)
             for j in range(9):
                 if self.puzzle[i][j] != 0:
                     self.domains[(i, j)] = [self.puzzle[i][j],]
                 else:
                     self.domains[(i, j)] = [x for x in range(1, 10)]
-                
                 self.peers[(i, j)] = self.get_peers((i, j))
-
                 self.pruned[(i, j)] = []
-
+            self.rows[i] = self.get_row(i)
+            self.cols[i] = self.get_col(i)
 
         # Set up neighbours dict (i, j) ->[pos] from rows, cols and peers 
         for i in range(9):
@@ -311,6 +327,24 @@ class Sudoku(object):
             for j in range(9):
                 for neighbour in self.neighbours[(i, j)]:
                     self.constraints.append(((i, j), neighbour))
+
+
+    def get_row(self, val):
+        return [(val, x) for x in range(9)]
+
+
+    def get_col(self, val):
+        return [(x, val) for x in range(9)]
+
+
+    def get_peers(self, pos):
+        # helper function
+        # get a list of peers (neighbours in the same 3*3 square)
+        result = []
+        for i in range(pos[0] - pos[0]%3, pos[0] - pos[0]%3 + 3):
+            for j in range(pos[1] - pos[1]%3, pos[1] - pos[1]%3 + 3):
+                result += [(i, j),]
+        return result
 
 
     # you may add more classes/functions if you think is useful
