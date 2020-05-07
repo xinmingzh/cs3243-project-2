@@ -1,5 +1,6 @@
 import sys
 import time
+import random
 from copy import deepcopy
 
 # Running script: given code can be run with the command:
@@ -10,25 +11,29 @@ class Sudoku(object):
         # you may add more attributes if you need
         self.puzzle = puzzle # self.puzzle is a list of lists
         self.ans = deepcopy(puzzle) # self.ans is a list of lists
-        self.domains = self.init_domain()
-        self.neighbours = self.init_neighbours()
-        self.pruned = self.init_pruned()
-        self.constaints = self.init_constraints()
-        self.nodes = 0
+        self.domains = dict()
+        self.pruned = dict()
+        self.rows = dict()
+        self.cols = dict()
+        self.peers = dict()
+        self.neighbours = dict()
+        self.constraints = list()
         self.time = time.time()
+        self.nodes = 0
+        self.do_precheck = True
+        self.do_MRV = True
+        self.do_LCV = True
+        self.do_AC3 = True
 
 
     def solve(self):
         # Main method called to run the alogorithm.
+        self.initialise()
 
-        self.precheck()
-        print("time taken: " + str(time.time() - self.time))
-        if not self.ac3(self.puzzle):
-            return self.puzzle
-        
-        print("time taken: " + str(time.time() - self.time))
+        if self.do_precheck:
+            self.precheck()
 
-        self.ans = self.backtrack(self.puzzle, True)
+        self.ans = self.backtrack(self.puzzle, self.do_AC3)
 
         print("nodes: " + str(self.nodes))
         print("time taken: " + str(time.time() - self.time))
@@ -87,19 +92,25 @@ class Sudoku(object):
 
     def select_unassigned_var(self, puzzle):
         # select unassigned variable with Minimum Remaining Values (MRV) heuristic
-        min_len = 10
-        pos = False
-        for i in range(9):
-            for j in range(9):
-                if puzzle[i][j] == 0:
-                    if len(self.domains[(i, j)]) == 1:
-                        return (i, j)
+        if self.do_MRV:
+            min_len = 10
+            min_pos = False
+            for pos, domain in self.domains.items():
+                if puzzle[pos[0]][pos[1]] == 0:
+                    d_len = len(domain)
+                    if d_len == 1:
+                        return pos
 
-                    if len(self.domains[(i, j)]) < min_len:
-                        pos = (i, j)
-                        min_len = len(self.domains[(i, j)])
-        # print(str(pos) + ": " + str(self.domains[pos]))
-        return pos
+                    if d_len < min_len:
+                        min_pos = pos
+                        min_len = d_len
+            # print(str(pos) + ": " + str(self.domains[pos]))
+            return min_pos
+        else:
+            for i in range(9):
+                for j in range(9):
+                    if puzzle[i][j] == 0:
+                        return (i, j)
 
 
     def ordered_domain_values(self, puzzle, pos):
@@ -107,7 +118,11 @@ class Sudoku(object):
         if len(self.domains[pos]) == 1:
             return self.domains[pos]
 
-        return sorted(self.domains[pos], key = lambda val: self.conflicts(puzzle, pos, val))
+        if self.do_LCV:
+            return sorted(self.domains[pos], key = lambda val: self.conflicts(puzzle, pos, val))
+        
+        else:
+            return sorted(self.domains[pos])
 
 
     def conflicts(self, puzzle, pos, val):
@@ -140,12 +155,12 @@ class Sudoku(object):
         # forward checks for domain reductions
         if flag:
             # perform ac3 algo
-            count = 20      # limits the number of iterations of ac3 checks to reduce time spent
+            count = 20    # limits the number of iterations of ac3 checks to reduce time spent
         
             queue = [(xk, pos) for xk in self.neighbours[pos]]
             while count and queue:
                 xi, xj = queue.pop(0)
-                if self.revise(puzzle, xi, xj, pos):
+                if self.revise(xi, xj, pos):
                     if not self.domains[xi]:
                         return False
                     for xk in self.neighbours[xi]:
@@ -172,8 +187,13 @@ class Sudoku(object):
 
             puzzle[pos[0]][pos[1]] = 0
 
+    def get_row(self, val):
+        return [(val, x) for x in range(9)]
 
-    def get_peers(self, puzzle, pos):
+    def get_col(self, val):
+        return [(x, val) for x in range(9)]
+
+    def get_peers(self, pos):
         # helper function
         # get a list of peers (neighbours in the same 3*3 square)
         result = []
@@ -185,36 +205,45 @@ class Sudoku(object):
 
     def ac3(self, puzzle):
         # ac3 algo used before backtracking
-        queue = [x for x in self.constaints]
+        queue = [x for x in self.constraints]
         count = 100     # limits the number of iterations of ac3 checks to reduce time spent
-        while count and queue:
+        while queue:
             xi, xj = queue.pop(0)
             if self.revise(puzzle, xi, xj):
                 if not self.domains[xi]:
                     return False
                 for xk in self.neighbours[xi]:
                     queue.append([xk, xi])
-            count -= 1
         return True
-    
 
-    def revise(self, puzzle, xi, xj, pos = None):
+
+    def revise(self, xi, xj, pos = None):
         # revise the pair of cells xi and xj
         # for value in domain of xi, if value not consistent with domain of xj, remove value
         revised = False
 
-        for x in self.domains[xi]:
-            if puzzle[xj[0]][xj[1]] == 0:
-                if not any([self.satisfy_binary_constraint(x, y) for y in self.domains[xj]]):
-                    self.domains[xi].remove(x)
-                    if pos:
-                        self.pruned[pos].append((xi, x))
-                    revised = True
-            elif x == puzzle[xj[0]][xj[1]]:
-                self.domains[xi].remove(x)
+        d = self.domains[xj]
+        if len(d) == 1:
+            if d[0] in self.domains[xi]:
+                self.domains[xi].remove(d[0])
                 if pos:
-                    self.pruned[pos].append((xi, x))
+                    self.pruned[pos].append((xi, d[0]))
                 revised = True
+
+        # for x in self.domains[xi]:
+        #     if puzzle[xj[0]][xj[1]] == 0:
+        #         if not any([self.satisfy_binary_constraint(x, y) for y in self.domains[xj]]):
+        #             self.domains[xi].remove(x)
+        #             if pos:
+        #                 self.pruned[pos].append((xi, x))
+        #             if not revised:
+        #                 revised = True
+        #     elif x == puzzle[xj[0]][xj[1]]:
+        #         self.domains[xi].remove(x)
+        #         if pos:
+        #             self.pruned[pos].append((xi, x))
+        #         if not revised:
+        #             revised = True
         return revised
 
 
@@ -222,54 +251,20 @@ class Sudoku(object):
         return val1 != val2
 
 
-    def init_domain(self):
-        result = {}
-        for i in range(9):
-            for j in range(9):
-                if self.puzzle[i][j] != 0:
-                    result[(i, j)] = [self.puzzle[i][j],]
-                else:
-                    result[(i, j)] = [x for x in range(1, 10)]
-        return result
-    
-
-    def init_neighbours(self):
-        # set up dict of cell -> [neighbours]
-        result = {}
-        for i in range(9):
-            for j in range(9):
-                result[(i, j)] = set()
-                result[(i, j)].update([(i, x) for x in range(9)])
-                result[(i, j)].update([(x, j) for x in range(9)])
-                result[(i, j)].update(self.get_peers(self.puzzle, (i, j)))
-                result[(i, j)].remove((i, j))
-        return result
-
-
-    def init_pruned(self):
-        # set up dict of cell -> [(neighbour, pruned value)]
-        result = {}
-        for i in range(9):
-            for j in range(9):
-                result[(i, j)] = []
-        return result
-
-
-    def init_constraints(self):
-        # set up list of [(cell, neighbour)]
-        result = []
-        for i in range(9):
-            for j in range(9):
-                for neighbour in self.neighbours[(i, j)]:
-                    result.append(((i, j), neighbour))
-        return result
-
-
     def print_puzzle(self):
+        z = 0
         for i in range(9):
+            k = 0
             for j in range(9):
                 print(str(puzzle[i][j]) + " "),
+                k += 1
+                if k % 3 == 0 and k < 9:
+                    print("| "),
             print("")
+            z += 1
+            if z % 3 == 0 and z < 9:
+                print("-------------------------------")
+
 
     def print_domains(self):
         print("Total: " + str(self.count_domain_vals()))
@@ -285,6 +280,38 @@ class Sudoku(object):
     
     def count_domain_vals(self):
         return sum([len(val) for key, val in self.domains.items()])
+
+    
+    def initialise(self):
+        # Set up domains dict (i, j) -> [values]
+        # Set up rows dict, cols dict i -> [pos] and peers dict (i, j) -> [pos]
+        # Set up empty pruned list
+        for i in range(9):
+            self.rows[i] = self.get_row(i)
+            self.cols[i] = self.get_col(i)
+            for j in range(9):
+                if self.puzzle[i][j] != 0:
+                    self.domains[(i, j)] = [self.puzzle[i][j],]
+                else:
+                    self.domains[(i, j)] = [x for x in range(1, 10)]
+                
+                self.peers[(i, j)] = self.get_peers((i, j))
+
+                self.pruned[(i, j)] = []
+
+
+        # Set up neighbours dict (i, j) ->[pos] from rows, cols and peers 
+        for i in range(9):
+            for j in range(9):
+                self.neighbours[(i, j)] = self.rows[i] + self.cols[j] + self.peers[(i, j)]
+                while (i, j) in self.neighbours[(i, j)]: self.neighbours[(i, j)].remove((i, j))
+
+        # Set up constraints list [(pos, neighbour)]
+        for i in range(9):
+            for j in range(9):
+                for neighbour in self.neighbours[(i, j)]:
+                    self.constraints.append(((i, j), neighbour))
+
 
     # you may add more classes/functions if you think is useful
     # However, ensure all the classes/functions are in this file ONLY
